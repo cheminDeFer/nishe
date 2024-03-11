@@ -12,6 +12,8 @@ type
     tkredirectfrom
     tkredirectstderrto
     tksinglequotedstr
+    tkspace
+    tkword
     tkerror
 
 type Token =  object
@@ -56,9 +58,15 @@ proc quotedString(source: string, index: var int, start: var int): Token =
   result = Token(kind: tksinglequotedstr, str_val: source[start+1 .. index-1])
   index += 1
     
-#this is an command ; print 'unqo | w' 
-    
-    
+#this is | an command ; print 'unqo | ; w' 
+proc isCharSpecial(c: char): bool =
+  return c in [';','&','\'', '|', ' ']
+
+proc word(source: string, index: var int, start: var int): Token =
+  while not( isCharSpecial peek(source, index)  ) and not(isAtEnd(source, index)):
+    index += 1
+  result = Token(kind: tkword, val: source[start .. index-1])
+ 
 proc scanTok(source : string,  index: var int,  line: var int, start: var int) : Token =
   let c = source[index]
   index += 1
@@ -86,10 +94,11 @@ proc scanTok(source : string,  index: var int,  line: var int, start: var int) :
    return Token(kind: tkredirectto, val: "", offset: index)
   of '\'':
     return quotedString(source, index, start )
-    
-    
+  of ' ':
+    return Token(kind:tkspace, val:"", offset:index) 
 
   else:
+    return word(source, index, start)
     var errmsg: string = fmt"Unknown char <{c}>"
     return Token(kind: tkerror, err_msg: errmsg , offset:index)
 
