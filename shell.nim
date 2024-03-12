@@ -55,7 +55,7 @@ proc quotedString(source: string, index: var int, start: var int): Token =
   if isAtEnd(source, index):
     result = Token(kind: tkerror, errmsg: fmt"Unmatched quotes in {start=}")
   echo fmt"{start=}, {index=}"
-  result = Token(kind: tksinglequotedstr, str_val: source[start+1 .. index-1])
+  result = Token(kind: tksinglequotedstr, str_val: source[start+1 .. index-1], offset:start+1)
   index += 1
     
 #this is | an command ; print 'unqo | ; w' 
@@ -99,8 +99,6 @@ proc scanTok(source : string,  index: var int,  line: var int, start: var int) :
 
   else:
     return word(source, index, start)
-    var errmsg: string = fmt"Unknown char <{c}>"
-    return Token(kind: tkerror, err_msg: errmsg , offset:index)
 
 proc tokenise(source:string) :seq[Token] =
   var line: int = 0
@@ -128,4 +126,42 @@ let toks:seq[Token] =  tokenise(sourcey)
 for tok in toks:
   echo tok
 
-#proc parser(tokens: seq[Token]) : ast? =
+
+type RedirectionKind = enum
+  rdFrom
+  rdTo
+  rdErrTo
+
+type Redirection = object
+  filename: string
+  kind :RedirectionKind
+
+proc peekToken(tokens: seq[Token], tok_index: int): Token =
+  return tokens[tok_index]
+  
+proc matchToken(tokens: seq[Token], tok_index: var int, expected: Token): bool =
+  if peekToken(tokens, tok_index).kind == expected.kind:
+    tok_index += 1
+    return true
+  else:
+    return false
+  
+
+
+proc redirection(tokens: seq[Token], tok_index: var int): Redirection =
+  if matchToken(tokens, tok_index,Token(kind:tkredirectto,val:"")):
+    while matchToken(tokens, tok_index, Token(kind:tkspace,val:"")):
+      echo "space consumed"
+    if peekToken(tokens, tok_index).kind == tkword:
+        result = Redirection(filename: tokens[tok_index].val, kind: rdTo  )
+        tok_index += 1
+        return result
+    else:
+      raise 
+  else:
+    raise 
+
+  
+     
+var tokidx: int = 0
+echo redirection(toks, tokidx)
