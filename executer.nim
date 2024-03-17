@@ -26,21 +26,22 @@ proc myExec(command: string, args: openArray[string] = [],
     line: string = newStringOfCap(120)
 
   let p = startProcess(command, args=args, env=env, options=options)
-  let (outSm, errorSm) = (outputStream(p), errorStream(p))
+  if not(poParentStreams in options):
+    let (outSm, errorSm) = (outputStream(p), errorStream(p))
 
-  while true:
-      # FIXME: converts CR-LF to LF.
-      if outSm.readLine(line):
-        outputStr.add(line)
-        outputStr.add("\n")
-      elif  not running(p): break
+    while true:
+        # FIXME: converts CR-LF to LF.
+        if outSm.readLine(line):
+          outputStr.add(line)
+          outputStr.add("\n")
+        elif  not running(p): break
 
-  while true:
-      # FIXME: converts CR-LF to LF.
-      if errorSm.readLine(line):
-        errorStr.add(line)
-        errorStr.add("\n")
-      elif not running(p): break
+    while true:
+        # FIXME: converts CR-LF to LF.
+        if errorSm.readLine(line):
+          errorStr.add(line)
+          errorStr.add("\n")
+        elif not running(p): break
 
   let exitCode = waitForExit(p, timeout = timeout)
   close(p)
@@ -75,7 +76,7 @@ proc evalAst( ast: Ast ): int=
     var command:string = ast.words[0]
     if builtinsMap.hasKey(command):
       return builtinsMap[command]()
-    var options  = {poUsePath}
+    var options  = {poUsePath, poParentStreams}
     if ast.redirection.kind == rdNo:
       options.incl( poStdErrToStdOut)
     else:
@@ -88,7 +89,6 @@ proc evalAst( ast: Ast ): int=
 
         let v= myExec(command, args=arg, #workingDir=".",
                  env=nil,     options= options)
-        stdout.write v[1]
         return v[0]
       except OsError as e:
         echo "Error: executing $1" % command
@@ -98,7 +98,6 @@ proc evalAst( ast: Ast ): int=
       try:
         let v= myExec(command, args=arg, #workingDir=".",
                  env=nil,     options= options)
-        stdout.write v[1]
         return v[0]
       except OsError as e:
         echo fmt"Error: executing {command=}, {arg=}"
