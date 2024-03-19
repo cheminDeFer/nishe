@@ -9,7 +9,48 @@ import std/streams
 import system
 import token
 import parser
+import std/dirs
 
+proc execWithRedir(command: string, args: openArray[string] = [],
+  env: StringTableRef = nil, options: set[ProcessOption] = {}, rd: Redirection) : int =
+  let fname = rd.filename
+  var line: string = newStringOfCap(120)
+  var src: Stream
+  var dst: Stream
+  # first check redirection streams is valid
+  if rd.kind == rdTo or rd.kind == rdErrTo:
+    dst = newFileStream(fname, fmWrite)
+    if isNil(dst):
+      echo fmt"Error: occured while redirection to {fname} "
+      return 1
+  elif rd.kind == rdFrom:
+    src = newFileStream(fname, fmRead)
+    if isNil(src):
+      echo fmt"Error: occured while redirection from {fname} "
+      return 1
+
+  let p = startProcess(command, args=args, env=env, options=options)
+  # repetition of  this check is in order to avoid starting process with valid redirection
+  if rd.kind == rdTo:
+    src = outputStream(p)
+  elif rd.kind == rdErrTo:
+    src = errorStream(p)
+  elif rd.kind == rdFrom:
+    dst = inputStream(p)
+  while true:
+    if src.readLine(line):
+      dst.write(line)
+      dst.write("\n")
+    elif  not running(p): break
+  # dont know which stream to close
+  if rd.kind == rdTo or rd.kind == rdErrTo:
+    dst.close()
+  elif rd.kind == rdFrom:
+    src.close()
+  let exitCode = waitForExit(p, timeout = -1)
+  close(p)
+
+  return exitCode
 
 # https://www.reddit.com/r/nim/comments/17v22rq/obtaining_exit_code_standard_output_and_standard/
 proc myExec(command: string, args: openArray[string] = [],
@@ -32,8 +73,8 @@ proc myExec(command: string, args: openArray[string] = [],
     while true:
         # FIXME: converts CR-LF to LF.
         if outSm.readLine(line):
-          outputStr.add(line)
-          outputStr.add("\n")
+            outputStr.add(line)
+            outputStr.add("\n")
         elif  not running(p): break
 
     while true:
@@ -49,19 +90,28 @@ proc myExec(command: string, args: openArray[string] = [],
   return (exitCode, outputStr, errorStr)
 
 
-proc builtinPwd() : int=
+proc builtinPwd(args: seq[string]) : int=
   echo getCurrentDir().string
   return 0
 
-const builtinsMap =  {"pwd": builtinPwd}.toTable
+proc builtinCd(args: seq[string]) : int=
+  # TODO too many args and not exist message
+  try:
+    setCurrentDir(args[0].Path)
+    return 0
+  except:
+    return 1
+
+const builtinsMap =  {"pwd": builtinPwd, "cd": builtinCd}.toTable
 
 proc evalAst( ast: Ast ): int=
   case ast.kind
   of astcmdline:
     result = 0
     for a in ast.lists:
-      if evalAst(a) > 0:
-        result = 1
+      let exitCode = evalAst(a) 
+      if exitCode> 0:
+        result = exitCode
   of astdandor:
     if ast.op == tkdand:
       if evalAst(ast.lhs) == 0:
@@ -69,39 +119,35 @@ proc evalAst( ast: Ast ): int=
     else:
       if evalAst(ast.lhs) != 0:
         return evalAst(ast.rhs)
-    # assert false, "TODO: pipeline eval in evalAst not implemented yet"
   of astpipeline:
     assert false, "TODO: pipeline eval in evalAst not implemented yet"
   of astcommand:
     var command:string = ast.words[0]
-    if builtinsMap.hasKey(command):
-      return builtinsMap[command]()
-    var options  = {poUsePath, poParentStreams}
-    if ast.redirection.kind == rdNo:
-      options.incl( poStdErrToStdOut)
-    else:
-      assert false, "redirection not implemented yet"
-
+    var arg : seq[string]
     if ast.words.len == 1:
-      try:
-        let arg: array[0,string] = []
-
-
-        let v= myExec(command, args=arg, #workingDir=".",
-                 env=nil,     options= options)
-        return v[0]
-      except OsError as e:
-        echo "Error: executing $1" % command
-        return 1
+      arg = @[]
     else:
-      let arg = ast.words[1..ast.words.len-1]
+      arg = ast.words[1..ast.words.len-1]
+    if builtinsMap.hasKey(command):
+      return builtinsMap[command](arg)
+    var options  = {poUsePath, poParentStreams}
+    if ast.redirection.kind == rdTo or ast.redirection.kind == rdErrTo or ast.redirection.kind == rdFrom:
+      options.excl(poParentStreams)
       try:
-        let v= myExec(command, args=arg, #workingDir=".",
-                 env=nil,     options= options)
-        return v[0]
+        return execWithRedir(command, args=arg, env=nil, options=options, rd=ast.redirection)
       except OsError as e:
-        echo fmt"Error: executing {command=}, {arg=}"
-        return 1
+        echo e.msg
+        return 127
+    else:
+      discard
+
+    try:
+      let v= myExec(command, args=arg, #workingDir=".",
+               env=nil,     options= options)
+      return v[0]
+    except OsError as e:
+      echo "Error: executing $1" % command
+      return 1
 
 
 
@@ -112,7 +158,7 @@ when isMainModule:
   import std/sugar
   # var source: string = "echo hi; true && echo always > /dev/null"
   var source: string
-  var prompt: string = "> "
+  var prompt: string = "% "
   while true:
     stdout.write(prompt)
     if not(stdin.readLine(source)):
@@ -122,11 +168,16 @@ when isMainModule:
     # for t in toks:
     #   echo t
     var p : Parser = Parser(tokens:toks)
-    var ast : Ast = p.parseCmdLine()
-    # echo ast
-    let i = evalAst(ast)
-    if i > 0:
-      prompt = fmt"> [{i}] "
-    else:
-      prompt = "> "
+    var ast:Ast
+    try:
+      ast= p.parseCmdLine()
+      # echo ast
+      let i: int = evalAst(ast)
+      if i > 0:
+        prompt = fmt"% [{i}] "
+      else:
+        prompt = "% "
+    except ValueError as e:
+      echo e.msg
+
   quit(0)

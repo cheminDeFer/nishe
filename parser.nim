@@ -5,6 +5,8 @@
 # redirection = (">"|"2>"|"<")  filename
 # terminator = ";" | "&" | "\n"
 import token
+import std/strutils
+import std/strformat
 type Parser* = ref object
   index: int # TODO: learn how to hide implementation details
   tokens*: seq[Token]
@@ -21,12 +23,12 @@ type RedirectionKind* = enum
   rdTo
   rdErrTo
 
-type Redirection = object
+type Redirection* = object
   case   kind* :RedirectionKind
   of rdNo:
     dont:char
   else:
-    filename: string
+    filename*: string
 
 type AstKind = enum
   astcmdline
@@ -122,12 +124,13 @@ proc parseCommand(self:Parser): Ast =
       break
 
   return result
-
 proc parseRedirection(self: Parser): Redirection=
   if self.peekToken.kind == tkredirectfrom:
     discard self.consumeToken
-    if self.peekToken.kind != tkword:
-      raise
+    while self.peekToken.kind == tkspace:
+      discard self.consumeToken
+    if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
+      raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
       result = Redirection(kind: rdFrom, filename:self.consumeToken.str_val)
   elif self.peekToken.kind == tkredirectto:
@@ -135,11 +138,17 @@ proc parseRedirection(self: Parser): Redirection=
     while self.peekToken.kind == tkspace:
       discard self.consumeToken
     if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
-      raise
+      raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
       result = Redirection(kind: rdTo, filename:self.consumeToken.str_val)
   elif self.peekToken.kind == tkredirectstderrto:
-    assert false, "TODO"
+    discard self.consumeToken
+    while self.peekToken.kind == tkspace:
+      discard self.consumeToken
+    if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
+      raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
+    else:
+      result = Redirection(kind: rdErrTo, filename:self.consumeToken.str_val)
   else:
     raise
 

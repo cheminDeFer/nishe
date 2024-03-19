@@ -1,4 +1,5 @@
 import std/strformat
+import std/strutils
 type
   TokKind* = enum
     tksemicolon
@@ -16,6 +17,7 @@ type
     tkerror
     tkeoi
 
+
 type Token* =  object
   line: int
   offset: int
@@ -26,6 +28,38 @@ type Token* =  object
     err_msg:string
   else:
     val: char# = "TODO: fixme with some null"
+
+
+proc `$`(t:Token) : string =
+    echo "$ for token called"
+    if t.kind == tksemicolon:
+      return "Token: ';' at offset $1" % $t.offset
+    elif t.kind == tkand:
+      return "Token: '&' at offset $1" % $t.offset
+    elif t.kind == tkdand:
+      return "Token: '&&' at offset $1" % $t.offset
+    elif t.kind == tkpipe:
+      return "Token: '|' at offset $1" % $t.offset
+    elif t.kind == tkdor:
+      return "Token: '|' at offset $1" % $t.offset
+    elif t.kind == tktilde:
+      return "Token: '~' at offset $1" % $t.offset
+    elif t.kind == tkredirectto:
+      return "Token: '>' at offset $1" % $t.offset
+    elif t.kind == tkredirectfrom:
+      return "Token: '<' at offset $1" % $t.offset
+    elif t.kind == tkredirectstderrto:
+      return "Token: '2>' at offset $1" % $t.offset
+    elif t.kind == tksinglequotedstr:
+      return "Token: ''...'' at offset $1" % $t.offset
+    elif t.kind == tkspace:
+      return "Token: ' ' at offset $1" % $t.offset
+    elif t.kind == tkword:
+      return "Token: 'word' at offset $1" % $t.offset
+    elif t.kind == tkerror:
+      return "Token: 'tkerror' at offset $1" % $t.offset
+    elif t.kind == tkeoi:
+      return "Token: 'EOI' at offset $1" % $t.offset
 
 
 proc isAtEnd(source: string, index:  int): bool =
