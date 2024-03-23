@@ -6,7 +6,6 @@
 # terminator = ";" | "&" | "\n"
 import token
 import std/strutils
-import std/strformat
 type Parser* = ref object
   index: int # TODO: learn how to hide implementation details
   tokens*: seq[Token]
@@ -30,7 +29,7 @@ type Redirection* = object
   else:
     filename*: string
 
-type AstKind = enum
+type AstKind* = enum
   astcmdline
   astdandor
   astpipeline
@@ -45,8 +44,7 @@ type Ast* = ref object
     lhs*: Ast
     rhs*: Ast
   of astpipeline:
-    lhsp*: Ast
-    rhsp*:  Ast
+    plists* : seq[Ast]
   of astcommand:
     words*: seq[string]
     redirection*: Redirection
@@ -68,6 +66,9 @@ proc matchToken(self:Parser, expected: Token): bool =
   else:
     return false
 
+proc eatSpace(self: Parser) =
+  while self.peekToken.kind == tkspace:
+    discard self.consumeToken
 proc parsePipeLine(self: Parser): Ast
 proc parseCommand(self: Parser): Ast
 proc parseRedirection(self: Parser): Redirection
@@ -90,6 +91,7 @@ proc parseCmdLine*(self:Parser): Ast =
 proc parseAndOr(self: Parser): Ast  =
   result = self.parsePipeLine
   while true:
+    self.eatSpace
     case (self.peekToken.kind):
     of tkdand:
       discard self.consumeToken
@@ -100,21 +102,27 @@ proc parseAndOr(self: Parser): Ast  =
     else:
       return result
 proc parsePipeLine(self: Parser): Ast =
-  result = self.parseCommand
+  result = Ast(kind:astpipeline)
+  result.plists.add(self.parseCommand)
   while true:
     case self.peekToken.kind
+    of tkspace:
+      discard self.consumeToken
     of tkpipe:
       discard self.consumeToken
-      return Ast(kind:astpipeline, lhsp:result,rhsp: self.parseCommand)
+      if self.peekToken.kind == tkeoi:
+        raise newException(ValueError, "nishe: expected command but got end of input")
+      result.plists.add(self.parseCommand)
     else:
       return result
 
 proc parseCommand(self:Parser): Ast =
   result = Ast(kind:astcommand)
+  self.eatSpace
   while true:
     var t = self.peekToken
     if t.kind == tkword or t.kind == tksinglequotedstr:
-      result.words.add(self.consumeToken.str_val)
+      result.words.add(self.consumeToken.strVal)
     elif t.kind == tkspace:
       discard self.consumeToken
     elif t.kind in @[ tkredirectfrom, tkredirectstderrto, tkredirectto]:
@@ -132,7 +140,7 @@ proc parseRedirection(self: Parser): Redirection=
     if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
       raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
-      result = Redirection(kind: rdFrom, filename:self.consumeToken.str_val)
+      result = Redirection(kind: rdFrom, filename:self.consumeToken.strVal)
   elif self.peekToken.kind == tkredirectto:
     discard self.consumeToken
     while self.peekToken.kind == tkspace:
@@ -140,7 +148,7 @@ proc parseRedirection(self: Parser): Redirection=
     if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
       raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
-      result = Redirection(kind: rdTo, filename:self.consumeToken.str_val)
+      result = Redirection(kind: rdTo, filename:self.consumeToken.strVal)
   elif self.peekToken.kind == tkredirectstderrto:
     discard self.consumeToken
     while self.peekToken.kind == tkspace:
@@ -148,7 +156,7 @@ proc parseRedirection(self: Parser): Redirection=
     if self.peekToken.kind != tkword and self.peekToken.kind != tksinglequotedstr :
       raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
-      result = Redirection(kind: rdErrTo, filename:self.consumeToken.str_val)
+      result = Redirection(kind: rdErrTo, filename:self.consumeToken.strVal)
   else:
     raise
 
@@ -157,7 +165,7 @@ proc parseRedirection(self: Parser): Redirection=
 proc `$`*(a: Ast): string =
   case a.kind
   of astcmdline:
-    result = "Ast: (\n" & $a.lists & ")\n"
+    result = "Ast[" & $a.lists.len & "]: ("  & $a.lists & ")"
   of astdandor:
     var v:string
     if a.op == tkdand:
@@ -168,9 +176,12 @@ proc `$`*(a: Ast): string =
       assert false, "unreachable"
     result = "(" & $a.lhs & v & $a.rhs & ")"
   of astcommand:
-    result = "cmd: " & $a.words & "\n"
+    result = "cmd: " & $a.words #& "."
   of astpipeline:
-    result = $a.lhs & "|" & $a.rhs
+    for l in a.plists:
+      result.add($l)
+      result.add(" | ")
+    result = result[0..^4]
   return result
 
 

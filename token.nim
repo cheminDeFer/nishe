@@ -23,9 +23,9 @@ type Token* =  object
   offset: int
   case kind*: TokKind
   of tksinglequotedstr, tkword:
-    str_val*: string
+    strVal*: string
   of tkerror:
-    err_msg:string
+    errMsg:string
   else:
     val: char# = "TODO: fixme with some null"
 
