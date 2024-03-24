@@ -12,23 +12,25 @@ import std/dirs
 import std/enumerate
 import std/appdirs
 
-let O_RDONLY {.header:"fcntl.h",importc, nodecl.}: cint
-let O_WRONLY {.header:"fcntl.h",importc, nodecl.}: cint
-let O_CREAT {.header:"fcntl.h",importc, nodecl.}: cint
-let S_IRUSR {.header:"fcntl.h",importc, nodecl.}: cint
-let S_IWUSR {.header:"fcntl.h",importc, nodecl.}: cint
+var variablesMap: Table[string,string] =  {"oldpwd": "" }.toTable
 
 proc builtinPwd(args: seq[string]) : int=
+  # this makes this proc not "gcsafe" thus storeable in to builtinsMap w/o type error
+  echo "LOG: oldpwd =$1 " % variablesMap["oldpwd"]
   echo getCurrentDir().string
   return 0
 
-proc builtinCd(args: seq[string]) : int=
+proc builtinCd(args: seq[string]) : int =
   # TODO too many args and not exist message
+  variablesMap["oldpwd"] = getCurrentDir().string
   var cdTarget: Path
   if args.len == 1:
     cdTarget = getHomeDir()
   else:
-    cdTarget = args[1].Path
+    try:
+      cdTarget = if args[1] == "-": variablesMap["oldpwd"].Path  else : args[1].Path
+    except:
+      return 1
   try:
     setCurrentDir(cdTarget)
     return 0
@@ -41,7 +43,7 @@ proc pipeWrapper(fd: array[2,cint]):int  {.header: "<unistd.h>", importc: "pipe"
 proc dup2Wrapper(oldfd:cint,newfd:cint ): int {.header: "<fcntl.h>", importc: "dup2".} 
 proc execvpWrapper( file: cstring, argv: array[64,cstring]): int {.header: "<unistd.h>", importc: "execvp".}
 proc openWrapper(filename: cstring, flags:cint, mode:cint): int {.header: "<fcntl.h>", importc: "open".} 
-proc forkWrapper(): int {.header: "<fcntl.h>", importc: "fork".} 
+proc forkWrapper(): int {.header: "<fcntl.h>", importc: "fork".}
 proc closeWrapper(fd:cint): int {.header: "<fcntl.h>", importc: "close".}
 proc waitpidWrapper(pid: int, wstatus: ptr cint , options: cint):int  {.header: "<sys/wait.h>", importc: "waitpid".}
 proc ftruncateWrapper(fd: cint, length: cint):int  {.header: "<unistd.h>", importc: "ftruncate".}
@@ -61,19 +63,27 @@ env: StringTableRef = nil) : int =
     discard closeWrapper(fd[1])
     input = fd[0]
   let finalCommand: Ast = plist[plist.len-1]
-  # var argvWithNull :array[64, cstring]
-  # var leak: int = 0
-  # for i, a in enumerate(finalCommand.words):
-  #   argvWithNull[i] = a.cstring
-  #   leak = i + 1
-  # argvWithNull[leak] = cast[cstring](0)
-
-  # if input != 0:
-  #   echo "dup2 called"
-  #   discard dup2Wrapper(input,0)
   assert(finalCommand.kind == astcommand, fmt"{finalCommand.kind=}")
   assert(finalCommand.words.len > 0 , fmt"{finalCommand.words=}")
   return execWithRedirC(finalCommand,input, -1,-1)
+
+# proc execWithPipeNHelper(command:string, argv: seq[string], inFile: File,outFile: File, errFile: File) =
+#   let p = startProcess(command,workingDir= ".",
+#                   args=argv, env=nil,
+#                   options= {poUsePath}) 
+#   if  inFile != stdin:
+#     p.inputStream.File = inFile
+#   # if  outFile != stdout:
+#   #   p.outFile = outFile
+#   # if  errFile != stderr:
+#   #   p.errFile = outFile
+#   let exitCode = p.waitForExit
+#   return exitCode
+
+
+proc execWithPipeN(ast:Ast): int =
+  discard
+
 
 
 
@@ -130,135 +140,28 @@ proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int=
 
   case ast.redirection.kind
   of rdFrom:
-    inputFd = openWrapper(ast.redirection.filename, O_RDONLY, 0)
-    if inputFd < 0:
-      echo fmt"Error: occured while redirection from {ast.redirection.filename} "
+    var f : File
+    if open(f, ast.redirection.filename, fmRead) == false:
+      echo fmt"Error: occured while redirection to {ast.redirection.filename} "
       return 1
+    inputFd = f.getOsFileHandle
   of rdErrTo:
-    let mode = S_IWUSR or S_IRUSR
-    let flags = O_WRONLY or O_CREAT
-    errFd = openWrapper(ast.redirection.filename,flags , mode) # TODO learn bitor
-    discard ftruncateWrapper(errFd.cint, cast[cint](0))
-    if errFd < 0:
+    var f : File
+    if open(f, ast.redirection.filename, fmWrite) == false:
       echo fmt"Error: occured while redirection to {ast.redirection.filename} "
       return 1
+    errFd = f.getOsFileHandle
   of rdTo:
-    let flags = O_WRONLY or O_CREAT
-    let mode = S_IWUSR or S_IRUSR 
-    outPutFd = openWrapper(ast.redirection.filename,flags, mode)
-    if outPutFd < 0:
+    var f : File
+    if open(f, ast.redirection.filename, fmWrite) == false:
       echo fmt"Error: occured while redirection to {ast.redirection.filename} "
       return 1
-    discard ftruncateWrapper(outPutFd.cint, cast[cint](0))
+    outPutFd = f.getOsFileHandle
+    # discard ftruncateWrapper(outPutFd.cint, cast[cint](0))
   of rdNo:
     discard
   # echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
   return execWithRedirCHelper(command,arg,inputFd.cint,outPutFd.cint,errFd.cint)
-
-
-
-
-
-# proc execWithRedir(ast: Ast, env: StringTableRef = nil, iStream: var Stream, oStream: var Stream ) : int  =
-#   assert ast.kind == astcommand, "execWithRedir should be called with astcommandtype"
-#   var command:string = ast.words[0]
-#   var arg : seq[string]
-#   if ast.words.len == 1:
-#     arg = @[]
-#   else:
-#     arg = ast.words[1..ast.words.len-1]
-#   if builtinsMap.hasKey(command):
-#     return builtinsMap[command](arg)
-#   var options  = {poUsePath, poParentStreams}
-#   let rd = ast.redirection
-#   if rd.kind == rdTo or rd.kind == rdErrTo or rd.kind == rdFrom:
-#     options.excl(poParentStreams)
-#   var line: string = newStringOfCap(120)
-#   var src: Stream
-#   var dst: Stream
-#   if isNil(iStream):
-#     if rd.kind == rdFrom:
-#       let fname = rd.filename
-#       src = newFileStream(fname, fmRead)
-#       if isNil(src):
-#         echo fmt"Error: occured while redirection from {fname} "
-#         return 1
-#   else:
-  #   echo "parent returned with {wstatus=}"
-#     src = iStream
-#   if isNil(oStream):
-#     if rd.kind == rdTo or rd.kind == rdErrTo:
-#       let fname = rd.filename
-#       dst = newFileStream(fname, fmWrite)
-#       if isNil(dst):
-#         echo fmt"Error: occured while redirection to {fname} "
-#         return 1
-#   else:
-#     dst = oStream
-
-
-
-#   # first check redirection streams is valid
-
-#   let p = startProcess(command, args=arg, env=env, options=options)
-#   if isNil(oStream):
-#     if rd.kind == rdTo:
-#       src = outputStream(p)
-#     elif rd.kind == rdErrTo:
-#       src = errorStream(p)
-#     elif rd.kind == rdFrom:
-#       dst = inputStream(p)
-#   # repetition of  this check is in order to avoid starting process with valid redirection
-#   if not (rd.kind == rdNo):
-#     while true:
-#       if src.readLine(line):
-#         dst.write(line)
-#         dst.write("\n")
-#       elif  not running(p): break
-#   # dont know which stream to close
-#   if isNil(oStream) and rd.kind == rdTo or rd.kind == rdErrTo:
-#     dst.close()
-#   elif isNil(iStream) and rd.kind == rdFrom:
-#     src.close()
-#   let exitCode = waitForExit(p, timeout = -1)
-#   close(p)
-
-#   return exitCode
-
-# https://www.reddit.com/r/nim/comments/17v22rq/obtaining_exit_code_standard_output_and_standard/
-proc myExec(command: string, args: openArray[string] = [],
-            env: StringTableRef = nil, options: set[ProcessOption] = {},
-            timeout : int = -1
-): (int, string, string) =
-  ## wrapper around startProcess, returning exitcode, stdout, stderr.
-  ##
-  ## warning: assumes utf8 output. Prob want binary read, if not.
-  assert false , "this is not gonna used from now on it served its inspirational purpose"
-  var
-    outputStr: string = ""
-    errorStr: string = ""
-    line: string = newStringOfCap(120)
-  let p = startProcess(command, args=args, env=env, options=options)
-  if not(poParentStreams in options):
-    let (outSm, errorSm) = (outputStream(p), errorStream(p))
-    while true:
-        # FIXME: converts CR-LF to LF.
-        if outSm.readLine(line):
-            outputStr.add(line)
-            outputStr.add("\n")
-        elif  not running(p): break
-    while true:
-        # FIXME: converts CR-LF to LF.
-        if errorSm.readLine(line):
-          errorStr.add(line)
-          errorStr.add("\n")
-        elif not running(p): break
-  let exitCode = waitForExit(p, timeout = timeout)
-  close(p)
-  return (exitCode, outputStr, errorStr)
-
-
-
 
 proc evalAst( ast: Ast ): int=
   case ast.kind
