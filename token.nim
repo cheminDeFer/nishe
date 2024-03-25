@@ -24,14 +24,12 @@ type Token* =  object
   case kind*: TokKind
   of tksinglequotedstr, tkword:
     strVal*: string
-  of tkerror:
-    errMsg:string
   else:
-    val: char# = "TODO: fixme with some null"
+    discard
 
 
 proc `$`(t:Token) : string =
-    echo "$ for token called"
+    echo "LOG: $ for token called"
     if t.kind == tksemicolon:
       return "Token: ';' at offset $1" % $t.offset
     elif t.kind == tkand:
@@ -84,8 +82,7 @@ proc quotedString(source: string, index: var int, start: var int): Token =
   while (peek(source, index) != '\'') and not(isAtEnd(source, index)):
     index += 1
   if isAtEnd(source, index):
-    result = Token(kind: tkerror, errmsg: fmt"Unmatched quotes in {start=}")
-  echo fmt"{start=}, {index=}"
+    raise newException(ValueError,fmt"Unmatched quotes in {start=}")
   result = Token(kind: tksinglequotedstr, str_val: source[start+1 .. index-1], offset:start+1)
   index += 1
 
@@ -105,29 +102,29 @@ proc scanTok(source : string,  index: var int,  line: var int, start: var int) :
   case c
   of '&':
     if match(source, index, '&'):
-      return Token(kind: tkdand, val:'-', offset:index)
+      return Token(kind: tkdand,  offset:index)
       
-    return Token(kind: tkand, val: '-', offset: index)
+    return Token(kind: tkand,  offset: index)
   of '|':
     if match(source, index, '|'):
-      return Token(kind: tkdor, val:'-', offset:index)
-    return Token(kind: tkpipe, val: '-', offset: index)
+      return Token(kind: tkdor,  offset:index)
+    return Token(kind: tkpipe,  offset: index)
   of '~':
-   return Token(kind: tktilde, val: '-', offset: index)
+   return Token(kind: tktilde,  offset: index)
 
   of ';':
-   return Token(kind: tksemicolon, val: '-', offset: index)
+   return Token(kind: tksemicolon,  offset: index)
   of '<':
-   return Token(kind: tkredirectfrom, val: '-', offset: index)
+   return Token(kind: tkredirectfrom,  offset: index)
   of '2':
     if match(source, index, '>'):
-      return Token(kind: tkredirectstderrto, val:'-', offset:index)
+      return Token(kind: tkredirectstderrto,  offset:index)
   of '>':
-   return Token(kind: tkredirectto, val: '-', offset: index)
+   return Token(kind: tkredirectto,  offset: index)
   of '\'':
     return quotedString(source, index, start )
   of ' ':
-    return Token(kind:tkspace, val:'-', offset:index) 
+    return Token(kind:tkspace,  offset:index) 
 
   else:
     return word(source, index, start)
@@ -140,7 +137,7 @@ proc tokenise*(source:string) :seq[Token] =
     start = index
     var tmp: Token = scanTok(source, (index), (line), start)
     result.add(tmp)
-  result.add(Token(kind:tkeoi,offset: (index), val:'-'))
+  result.add(Token(kind:tkeoi,offset: (index)))
 
 
   return result

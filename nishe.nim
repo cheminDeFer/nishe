@@ -1,4 +1,6 @@
+import std/os
 import std/osproc
+import std/sugar
 import std/strutils
 import std/strformat
 import std/paths
@@ -14,18 +16,26 @@ import std/appdirs
 
 var variablesMap: Table[string,string] =  {"oldpwd": "" }.toTable
 
-proc builtinPwd(args: seq[string]) : int=
+proc builtinPwd(args: seq[string]) : int {.raises:[].}=
   # this makes this proc not "gcsafe" thus storeable in to builtinsMap w/o type error
-  echo "LOG: oldpwd =$1 " % variablesMap["oldpwd"]
-  echo getCurrentDir().string
+  if "oldpwd" in variablesMap:
+    {.cast(raises:[]).}:
+      echo "LOG: oldpwd =$1 " % variablesMap["oldpwd"]
+  try:
+    echo paths.getCurrentDir().string
+  except OSError:
+    return 1
   return 0
 
-proc builtinCd(args: seq[string]) : int =
+proc builtinCd(args: seq[string]) : int {.raises:[].} =
   # TODO too many args and not exist message
-  variablesMap["oldpwd"] = getCurrentDir().string
+  try:
+    variablesMap["oldpwd"] = paths.getCurrentDir().string
+  except OSError:
+    variablesMap["oldpwd"] = ""
   var cdTarget: Path
   if args.len == 1:
-    cdTarget = getHomeDir()
+    cdTarget = appdirs.getHomeDir()
   else:
     try:
       cdTarget = if args[1] == "-": variablesMap["oldpwd"].Path  else : args[1].Path
@@ -42,11 +52,11 @@ const builtinsMap =  {"pwd": builtinPwd, "cd": builtinCd}.toTable
 proc pipeWrapper(fd: array[2,cint]):int  {.header: "<unistd.h>", importc: "pipe".}
 proc dup2Wrapper(oldfd:cint,newfd:cint ): int {.header: "<fcntl.h>", importc: "dup2".} 
 proc execvpWrapper( file: cstring, argv: array[64,cstring]): int {.header: "<unistd.h>", importc: "execvp".}
-proc openWrapper(filename: cstring, flags:cint, mode:cint): int {.header: "<fcntl.h>", importc: "open".} 
+# proc openWrapper(filename: cstring, flags:cint, mode:cint): int {.header: "<fcntl.h>", importc: "open".} 
 proc forkWrapper(): int {.header: "<fcntl.h>", importc: "fork".}
 proc closeWrapper(fd:cint): int {.header: "<fcntl.h>", importc: "close".}
 proc waitpidWrapper(pid: int, wstatus: ptr cint , options: cint):int  {.header: "<sys/wait.h>", importc: "waitpid".}
-proc ftruncateWrapper(fd: cint, length: cint):int  {.header: "<unistd.h>", importc: "ftruncate".}
+# proc ftruncateWrapper(fd: cint, length: cint):int  {.header: "<unistd.h>", importc: "ftruncate".}
 
 # proc execWithRedir(ast: Ast, env: StringTableRef = nil, iStream: Stream, oStream:Stream ) : int
 proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int
@@ -87,7 +97,7 @@ proc execWithPipeN(ast:Ast): int =
 
 
 
-
+# https://stackoverflow.com/questions/11515399/implementing-shell-in-c-and-need-help-handling-input-output-redirection
 proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, outputFd: cint, errFd: cint) : int =
   # echo fmt"LOG: helper called with {command=} {argv=} {inputFd=}, {outputFd=}, {errFd=}"
   var sargv: array[64,cstring]
@@ -127,7 +137,8 @@ proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int=
   var command:string = ast.words[0]
   var arg : seq[string] = ast.words
   if builtinsMap.hasKey(command):
-     return builtinsMap[command](arg)
+    {.cast(raises:[])}
+    return builtinsMap[command](arg)
   var inputFd:int = 0
   var outPutFd: int = 1
   var errFd : int   = 2
@@ -163,7 +174,7 @@ proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int=
   # echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
   return execWithRedirCHelper(command,arg,inputFd.cint,outPutFd.cint,errFd.cint)
 
-proc evalAst( ast: Ast ): int=
+proc evalAst( ast: Ast ): int =
   case ast.kind
   of astcmdline:
     result = 0
@@ -187,31 +198,35 @@ proc evalAst( ast: Ast ): int=
       echo e.msg
       return 127
 
+proc main() =
 
-
-
-when isMainModule:
-  import std/sugar
-  # var source: string = "echo hi; true && echo always > /dev/null"
-  # from std/os import paramCount, paramStr
   var parseOnly: bool = false
+  let
+    nParams = paramCount()
+  if nParams == 1:
+    var v= paramStr(1)
+    if v == "-p":
+      parseOnly = true
   var source: string
   var prompt: string = "% "
   while true:
     stdout.write(prompt)
     if not(stdin.readLine(source)):
       break
-
-    var toks: seq[Token] = tokenise(source)
+    var toks: seq[Token]
+    try:
+      toks= tokenise(source)
+    except ValueError as e:
+      echo e.msg
     # for t in toks:
     #   echo t
-    var p : Parser = Parser(tokens:toks)
-    var ast:Ast
     try:
-      ast= p.parseCmdLine()
+      var p : Parser = Parser(tokens:toks)
+      var ast:Ast = p.parseCmdLine()
       # echo ast
       if parseOnly:
         echo ast
+
         continue
       let i: int = evalAst(ast)
       if i != 0:
@@ -222,3 +237,7 @@ when isMainModule:
       echo e.msg
 
   quit(0)
+
+
+when isMainModule:
+  main()

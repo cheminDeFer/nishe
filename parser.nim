@@ -25,7 +25,7 @@ type RedirectionKind* = enum
 type Redirection* = object
   case   kind* :RedirectionKind
   of rdNo:
-    dont:char
+    discard
   else:
     filename*: string
 
@@ -74,8 +74,10 @@ proc parseCommand(self: Parser): Ast
 proc parseRedirection(self: Parser): Redirection
 proc parseAndOr(self: Parser): Ast
 proc parseCmdLine*(self:Parser): Ast =
+  echo "LOG: parseCmdLine called"
   result = Ast(kind:astcmdline)
-  while  self.peekToken.kind != tkeoi:
+  while  true:
+    self.eatSpace
     var t: Token  = self.peekToken
     if t.kind == tksemicolon:
       discard self.consumeToken
@@ -84,11 +86,14 @@ proc parseCmdLine*(self:Parser): Ast =
       discard self.consumeToken
       result.inBackGround = true
       continue
+    elif t.kind == tkeoi:
+      break
     result.lists.add(self.parseAndOr)
   return result
 
 
-proc parseAndOr(self: Parser): Ast  =
+proc parseAndOr(self: Parser): Ast =
+  echo "LOG: parseAndOr called"
   result = self.parsePipeLine
   while true:
     self.eatSpace
@@ -102,12 +107,13 @@ proc parseAndOr(self: Parser): Ast  =
     else:
       return result
 proc parsePipeLine(self: Parser): Ast =
+  echo "LOG: parsePipeLine called"
+
   result = Ast(kind:astpipeline)
   result.plists.add(self.parseCommand)
   while true:
+    self.eatSpace
     case self.peekToken.kind
-    of tkspace:
-      discard self.consumeToken
     of tkpipe:
       discard self.consumeToken
       if self.peekToken.kind == tkeoi:
@@ -118,13 +124,11 @@ proc parsePipeLine(self: Parser): Ast =
 
 proc parseCommand(self:Parser): Ast =
   result = Ast(kind:astcommand)
-  self.eatSpace
   while true:
+    self.eatSpace
     var t = self.peekToken
     if t.kind == tkword or t.kind == tksinglequotedstr:
       result.words.add(self.consumeToken.strVal)
-    elif t.kind == tkspace:
-      discard self.consumeToken
     elif t.kind in @[ tkredirectfrom, tkredirectstderrto, tkredirectto]:
       result.redirection = self.parseRedirection
       return result
@@ -157,8 +161,6 @@ proc parseRedirection(self: Parser): Redirection=
       raise newException(ValueError, "nishe: expected word or singlequotedstr got $1" % $self.peekToken)
     else:
       result = Redirection(kind: rdErrTo, filename:self.consumeToken.strVal)
-  else:
-    raise
 
 
 
