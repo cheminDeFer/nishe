@@ -14,13 +14,9 @@ import std/dirs
 import std/enumerate
 import std/appdirs
 
-var variablesMap: Table[string,string] =  {"oldpwd": "" }.toTable
+var variablesMap{.threadvar.}: Table[string,string]
 
 proc builtinPwd(args: seq[string]) : int {.raises:[].}=
-  # this makes this proc not "gcsafe" thus storeable in to builtinsMap w/o type error
-  if "oldpwd" in variablesMap:
-    {.cast(raises:[]).}:
-      echo "LOG: oldpwd =$1 " % variablesMap["oldpwd"]
   try:
     echo paths.getCurrentDir().string
   except OSError:
@@ -47,7 +43,22 @@ proc builtinCd(args: seq[string]) : int {.raises:[].} =
   except:
     return 1
 
-const builtinsMap =  {"pwd": builtinPwd, "cd": builtinCd}.toTable
+proc builtinSet(args: seq[string]): int {.raises:[ValueError].} =
+  {.cast(raises:[]).}:
+    if args.len < 3:
+      echo "Error: set expects two arguments <key> <value> got: $1" % $args.len
+      return 0
+  let key = args[1]
+  let value = args[2]
+  try:
+    putEnv(key, value)
+    return 0
+  except OSError as e:
+    echo "Error: setting values $1 $2 due to '$3'" % [key, value, e.msg]
+
+
+# Type hint generalize type instead of inference picking more specific type
+const builtinsMap :Table[string,proc] =  {"pwd": builtinPwd, "cd": builtinCd, "set": builtinSet}.toTable
 
 proc pipeWrapper(fd: array[2,cint]):int  {.header: "<unistd.h>", importc: "pipe".}
 proc dup2Wrapper(oldfd:cint,newfd:cint ): int {.header: "<fcntl.h>", importc: "dup2".} 
@@ -59,22 +70,28 @@ proc waitpidWrapper(pid: int, wstatus: ptr cint , options: cint):int  {.header: 
 # proc ftruncateWrapper(fd: cint, length: cint):int  {.header: "<unistd.h>", importc: "ftruncate".}
 
 # proc execWithRedir(ast: Ast, env: StringTableRef = nil, iStream: Stream, oStream:Stream ) : int
-proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int
-proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, outputFd: cint, errFd: cint) : int
+proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int {.raises:[]}
+proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, outputFd: cint, errFd: cint, redKind: RedirectionKind) : int {.raises:[]}
 proc execWithPipe(plist : seq[Ast],
-env: StringTableRef = nil) : int =
+env: StringTableRef = nil) : int {.raises:[]}=
+  {.cast(raises:[]).}:
+    assert(plist.len > 0, "Error: expected at least one command in pipeline got {$1}" % $plist.len)
   var input: cint = 0
   var fd : array[2,cint]
   for i,c in enumerate(plist):
     if i == plist.len - 1:
       break;
     discard pipeWrapper(fd)
-    result = execWithRedirC(c, input, fd[1], 2.cint)
+    let x: int =  2
+    result = execWithRedirC(c, input, fd[1], x.cint)
     discard closeWrapper(fd[1])
     input = fd[0]
-  let finalCommand: Ast = plist[plist.len-1]
-  assert(finalCommand.kind == astcommand, fmt"{finalCommand.kind=}")
-  assert(finalCommand.words.len > 0 , fmt"{finalCommand.words=}")
+  {.cast(raises:[]).}:
+    let finalCommand: Ast = plist[plist.len-1]
+
+  {.cast(raises:[]).}:
+    assert(finalCommand.kind == astcommand, fmt"{finalCommand.kind=}")
+    assert(finalCommand.words.len > 0 , fmt"{finalCommand.words=}")
   return execWithRedirC(finalCommand,input, -1,-1)
 
 # proc execWithPipeNHelper(command:string, argv: seq[string], inFile: File,outFile: File, errFile: File) =
@@ -98,7 +115,7 @@ proc execWithPipeN(ast:Ast): int =
 
 
 # https://stackoverflow.com/questions/11515399/implementing-shell-in-c-and-need-help-handling-input-output-redirection
-proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, outputFd: cint, errFd: cint) : int =
+proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, outputFd: cint, errFd: cint, redKind: RedirectionKind) : int {.raises:[]} =
   # echo fmt"LOG: helper called with {command=} {argv=} {inputFd=}, {outputFd=}, {errFd=}"
   var sargv: array[64,cstring]
   var leak: int = 0
@@ -125,6 +142,17 @@ proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, out
   elif pid < 0:
     echo "Error fork"
   else:
+    if inputFd != 0:
+      discard closeWrapper(inputFd)
+    case redKind
+    of rdTo:
+      discard closeWrapper(outPutFd)
+    of rdErrTo:
+      discard closeWrapper(errFd)
+    of rdFrom:
+      discard closeWrapper(inputFd)
+    of rdNo:
+      discard
     var wstatus: cint = 0
     if waitpidWrapper(pid, addr wstatus, 0.cint) < 0:
       echo "Error waitpid"
@@ -132,13 +160,15 @@ proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, out
     return wstatus
 
 
-proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int=
-  assert ast.kind == astcommand, "execWithRedir should be called with astcommandtype"
+proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int {.raises:[]} =
+  {.cast(raises:[]).}:
+    assert ast.kind == astcommand, "execWithRedir should be called with astcommandtype"
+    assert ast.words.len > 0, fmt"astcommand needs to have at least one word in it got {ast.words.len}"
   var command:string = ast.words[0]
   var arg : seq[string] = ast.words
   if builtinsMap.hasKey(command):
-    {.cast(raises:[])}
-    return builtinsMap[command](arg)
+    {.cast(raises:[]).}:
+      return builtinsMap[command](arg)
   var inputFd:int = 0
   var outPutFd: int = 1
   var errFd : int   = 2
@@ -148,31 +178,37 @@ proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int=
     outPutFd = co
   if ce != -1:
     errFd = ce
-
-  case ast.redirection.kind
+  {.cast(raises:[]).}:
+    let rd = ast.redirection.kind
+  case rd
   of rdFrom:
+    let fname:string = ast.redirection.filename
     var f : File
-    if open(f, ast.redirection.filename, fmRead) == false:
-      echo fmt"Error: occured while redirection to {ast.redirection.filename} "
+    if open(f, fname, fmRead) == false:
+      # echo "Error: occured while redirection to {$1} " % $fname
       return 1
     inputFd = f.getOsFileHandle
   of rdErrTo:
+    let fname:string = ast.redirection.filename
     var f : File
-    if open(f, ast.redirection.filename, fmWrite) == false:
-      echo fmt"Error: occured while redirection to {ast.redirection.filename} "
+    if open(f, fname, fmWrite) == false:
+      # echo fmt"Error: occured while redirection to {fname} "
       return 1
     errFd = f.getOsFileHandle
   of rdTo:
+    let fname:string = ast.redirection.filename
     var f : File
-    if open(f, ast.redirection.filename, fmWrite) == false:
-      echo fmt"Error: occured while redirection to {ast.redirection.filename} "
+    if open(f, fname, fmWrite) == false:
+      # echo fmt"Error: occured while redirection to {fname} "
       return 1
+
     outPutFd = f.getOsFileHandle
     # discard ftruncateWrapper(outPutFd.cint, cast[cint](0))
   of rdNo:
     discard
-  # echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
-  return execWithRedirCHelper(command,arg,inputFd.cint,outPutFd.cint,errFd.cint)
+  {.cast(raises:[]).}:
+    echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
+  return execWithRedirCHelper(command,arg,inputFd.cint,outPutFd.cint,errFd.cint, rd)
 
 proc evalAst( ast: Ast ): int =
   case ast.kind
@@ -192,11 +228,7 @@ proc evalAst( ast: Ast ): int =
   of astpipeline:
     return execWithPipe(ast.plists, env= nil)
   of astcommand:
-    try:
-      return execWithRedirC(ast,-1,-1,-1)
-    except OsError as e:
-      echo e.msg
-      return 127
+    return execWithRedirC(ast,-1,-1,-1)
 
 proc main() =
 
