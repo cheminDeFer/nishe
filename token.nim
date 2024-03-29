@@ -14,7 +14,7 @@ type
     tksinglequotedstr
     tkspace
     tkword
-    tkerror
+    tklookup
     tkeoi
 
 
@@ -22,14 +22,14 @@ type Token* =  object
   line: int
   offset: int
   case kind*: TokKind
-  of tksinglequotedstr, tkword:
+  of tksinglequotedstr, tkword, tklookup:
     strVal*: string
   else:
     discard
 
 
 proc `$`(t:Token) : string =
-    echo "LOG: $ for token called"
+    #echo "LOG: $ for token called"
     if t.kind == tksemicolon:
       return "Token: ';' at offset $1" % $t.offset
     elif t.kind == tkand:
@@ -54,8 +54,8 @@ proc `$`(t:Token) : string =
       return "Token: ' ' at offset $1" % $t.offset
     elif t.kind == tkword:
       return "Token: 'word' at offset $1" % $t.offset
-    elif t.kind == tkerror:
-      return "Token: 'tkerror' at offset $1" % $t.offset
+    elif t.kind == tklookup:
+      return "Token: 'tklookup' at offset $1" % $t.offset
     elif t.kind == tkeoi:
       return "Token: 'EOI' at offset $1" % $t.offset
 
@@ -88,7 +88,7 @@ proc quotedString(source: string, index: var int, start: var int): Token =
 
 
 proc isCharSpecial(c: char): bool =
-  return c in [';','&','\'', '|', ' ']
+  return c in [';','&','\'', '|', ' ', '$']
 
 
 proc word(source: string, index: var int, start: var int): Token =
@@ -124,7 +124,13 @@ proc scanTok(source : string,  index: var int,  line: var int, start: var int) :
   of '\'':
     return quotedString(source, index, start )
   of ' ':
-    return Token(kind:tkspace,  offset:index) 
+    return Token(kind:tkspace,  offset:index)
+  of '$':
+    if peek(source, index).isCharSpecial:
+      raise newException(ValueError, "Error: expected word after $$ got $1" %  $peek(source, index))
+    start += 1
+    let tmp = word(source, index, start)
+    return Token(kind:tklookup,strVal: tmp.strVal, offset:index)
 
   else:
     return word(source, index, start)

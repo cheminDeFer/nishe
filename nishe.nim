@@ -1,12 +1,9 @@
 import std/os
-import std/osproc
-import std/sugar
 import std/strutils
 import std/strformat
 import std/paths
 import std/tables
 import std/strtabs
-import std/streams
 import system
 import token
 import parser
@@ -138,7 +135,8 @@ proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, out
         echo "ERROR dup2"
       discard closeWrapper(errFd)
     if execvpWrapper(command, sargv) < 0:
-      quit(1)
+      # echo "LOG: execvp error in subprocess"
+      quit(127)
   elif pid < 0:
     echo "Error fork"
   else:
@@ -157,18 +155,27 @@ proc execWithRedirCHelper(command:string , argv: seq[string], inputFd: cint, out
     if waitpidWrapper(pid, addr wstatus, 0.cint) < 0:
       echo "Error waitpid"
     # TODO: fix here for return codes of external apps
-    return wstatus
+    return wstatus shr 8
 
-
+proc lookup(a : string) : string {.raises:[]} =
+  if a.len > 2 and a[0..1] == "_l":
+    return getEnv(a[2..a.len-1],"")
+  else:
+    return a
 proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int {.raises:[]} =
   {.cast(raises:[]).}:
     assert ast.kind == astcommand, "execWithRedir should be called with astcommandtype"
     assert ast.words.len > 0, fmt"astcommand needs to have at least one word in it got {ast.words.len}"
   var command:string = ast.words[0]
   var arg : seq[string] = ast.words
+  command = lookup(command)
+  for i,a in arg:
+    arg[i] = lookup(a)
+
   if builtinsMap.hasKey(command):
     {.cast(raises:[]).}:
       return builtinsMap[command](arg)
+
   var inputFd:int = 0
   var outPutFd: int = 1
   var errFd : int   = 2
@@ -207,7 +214,8 @@ proc execWithRedirC(ast:Ast, ci:cint, co:cint,ce:cint ): int {.raises:[]} =
   of rdNo:
     discard
   {.cast(raises:[]).}:
-    echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
+    discard
+    # echo fmt"LOG: {command=} {arg=} {inputFd=}, {outputFd=}, {errFd=}"
   return execWithRedirCHelper(command,arg,inputFd.cint,outPutFd.cint,errFd.cint, rd)
 
 proc evalAst( ast: Ast ): int =

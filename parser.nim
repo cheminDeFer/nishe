@@ -47,6 +47,7 @@ type Ast* = ref object
     plists* : seq[Ast]
   of astcommand:
     words*: seq[string]
+    quoted*: seq[bool]
     redirection*: Redirection
 
 
@@ -74,7 +75,7 @@ proc parseCommand(self: Parser): Ast
 proc parseRedirection(self: Parser): Redirection
 proc parseAndOr(self: Parser): Ast
 proc parseCmdLine*(self:Parser): Ast =
-  echo "LOG: parseCmdLine called"
+  # echo "LOG: parseCmdLine called"
   result = Ast(kind:astcmdline)
   while  true:
     self.eatSpace
@@ -93,7 +94,7 @@ proc parseCmdLine*(self:Parser): Ast =
 
 
 proc parseAndOr(self: Parser): Ast =
-  echo "LOG: parseAndOr called"
+  # echo "LOG: parseAndOr called"
   result = self.parsePipeLine
   while true:
     self.eatSpace
@@ -107,7 +108,7 @@ proc parseAndOr(self: Parser): Ast =
     else:
       return result
 proc parsePipeLine(self: Parser): Ast =
-  echo "LOG: parsePipeLine called"
+  # echo "LOG: parsePipeLine called"
 
   result = Ast(kind:astpipeline)
   result.plists.add(self.parseCommand)
@@ -132,6 +133,9 @@ proc parseCommand(self:Parser): Ast =
     elif t.kind in @[ tkredirectfrom, tkredirectstderrto, tkredirectto]:
       result.redirection = self.parseRedirection
       return result
+    elif t.kind == tklookup:
+      # echo "hit tklookup"
+      result.words.add("_l" & self.consumeToken.strVal)
     else:
       break
 
