@@ -3,7 +3,7 @@ My experiment for learning how shells, pipes, redirections etc. works.
 
 [,shell]
 --------------------------------------------
-git clone
+git clone https://github.com/cheminDeFer/nishe.git
 cd nishe
 nim c -r nishe.nim
 ./nishe
@@ -16,17 +16,17 @@ nim c -r nishe.nim
 ls | grep a | cat
 ----
 * Redirection
-- stdout
+  - stdout
+  - stderr
+  - stdin
 [,shell]
 ----
 ls > a
 ----
-- stderr
 [,shell]
 ----
 ls nonexistanfile 2> a
 ----
-- stdin
 [,shell]
 ----
 cat < nishe.nim
