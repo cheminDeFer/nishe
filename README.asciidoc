@@ -1,0 +1,52 @@
+= Nishe Fish-like minimal shell in Nim
+My experiment for learning how shells, pipes, redirections etc. works.
+
+[,shell]
+--------------------------------------------
+git clone
+cd nishe
+nim c -r nishe.nim
+./nishe
+--------------------------------------------
+
+= Features
+* Piping
+[,shell]
+----
+ls | grep a | cat
+----
+* Redirection
+- stdout
+[,shell]
+----
+ls > a
+----
+- stderr
+[,shell]
+----
+ls nonexistanfile 2> a
+----
+- stdin
+[,shell]
+----
+cat < nishe.nim
+----
+* Basic environmental variable setting/reading
+[,shell]
+----
+set e vim
+$e main.c
+----
+
+= Possible todo features
+  * Reading files
+  * Backgrounding currently '&' token behaves same as ';'
+  * Loops
+  * Functions
+
+= Requirements
+  * Linux OS
+  * Nim compiler
+    ** C compiler
+
+
